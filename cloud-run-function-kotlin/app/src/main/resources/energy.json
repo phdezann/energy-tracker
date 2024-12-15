@@ -1,0 +1,14 @@
+[
+  {
+    "label": "Gasoline",
+    "unit": "liter",
+    "type": "volume",
+    "energy_capacity_kwh": 10
+  },
+  {
+    "label": "Energy of moving car",
+    "unit": "km",
+    "type": "distance",
+    "energy_capacity_kwh": 0.53
+  }
+]

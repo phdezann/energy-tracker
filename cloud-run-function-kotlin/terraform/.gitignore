@@ -1,0 +1,14 @@
+# Exclure les fichiers d'état
+terraform.tfstate
+terraform.tfstate.backup
+
+# Exclure les plans Terraform générés
+*.tfplan
+
+# Exclure le dossier contenant les plugins téléchargés
+.terraform/
+
+# Exclure les fichiers de configuration avec des informations sensibles
+*.tfvars
+
+*.lock.info
