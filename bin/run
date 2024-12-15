@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# shellcheck disable=SC2029
+
+set -e -u -x
+
+build_image() {
+  if gcloud artifacts docker tags list "${repo}" --format='[no-heading](tag)' --quiet | grep -q "${git_hash}"; then
+    echo "Image already built, skipping"
+    return
+  fi
+
+  if ! git branch -r --contains "${git_hash}" | grep -q 'origin/master'; then
+    git push origin "${git_hash}:master" -f
+    echo "Pushed up to commit ${git_hash}"
+  fi
+
+  local_docker_build="${current_dir}/.docker-build"
+  remote_root_dir="/opt/ph_dezanneau/energy-tracker"
+  remote_src_dir="${remote_root_dir}/src"
+  git_repo="git@github.com:phdezann/energy-tracker.git"
+  {
+    echo "#!/usr/bin/env bash"
+    echo "set -e -u -x"
+    echo "rm -Rf ${remote_src_dir}"
+    echo "git clone ${git_repo} ${remote_src_dir}"
+    echo "git -C ${remote_src_dir} checkout ${git_hash}"
+    echo "docker build                                   \\"
+    echo "  --platform linux/x86_64                      \\"
+    echo "  -t ${image}                                  \\"
+    echo "  ${remote_src_dir}"
+    echo "docker push ${image}"
+  } >"${local_docker_build}"
+
+  vm-ctl whale-vm start
+  vm-ctl whale-vm wait_startup
+
+  remote_docker_build="${remote_root_dir}/docker-build"
+  ssh whale-vm rm -Rf "${remote_root_dir}"
+  ssh whale-vm mkdir -p "${remote_root_dir}"
+  scp "${local_docker_build}" "whale-vm:${remote_docker_build}"
+  rm "${local_docker_build}"
+
+  ssh whale-vm chmod u+x "${remote_docker_build}" "${remote_docker_build}"
+  ssh whale-vm "${remote_docker_build}"
+}
+
+run_image() {
+  local_systemd_env="${current_dir}/.env.systemd"
+  {
+    echo "image=${image}"
+    echo "container_name=phdezanneau-dev-energy-tracker"
+  } >"${local_systemd_env}"
+
+  remote_root_dir="/opt/ph_dezanneau/phdezanneau-dev-energy-tracker/run"
+  remote_systemd_env="${remote_root_dir}/env.systemd"
+  ssh gannet-vm rm -Rf "${remote_root_dir}"
+  ssh gannet-vm mkdir -p "${remote_root_dir}"
+  scp "${local_systemd_env}" "gannet-vm:${remote_systemd_env}"
+  rm "${local_systemd_env}"
+
+  echo "Restarting service phdezanneau-dev-energy-tracker on gannet-vm"
+  ssh gannet-vm "sudo systemctl daemon-reload"
+  ssh gannet-vm "sudo systemctl restart phdezanneau-dev-energy-tracker.service"
+}
+
+print_usage() {
+  echo "Usage: <git-hash>"
+}
+
+parse_arguments() {
+  if [[ "$#" != 1 ]]; then
+    print_usage
+    exit 1
+  fi
+
+  git_hash="$1"
+
+  if [[ -z "${git_hash}" ]]; then
+    echo "'git_hash' must be set."
+    print_usage
+    exit 1
+  fi
+}
+
+setup() {
+  current_dir=$(dirname "${0}")
+  git_hash=$(git -C "${current_dir}/.." rev-parse --short "${git_hash}")
+  repo="europe-west2-docker.pkg.dev/phdezann-sandbox/phdezann-repo/phdezanneau-dev/energy-tracker"
+  image="${repo}:${git_hash}"
+}
+
+parse_arguments "$@"
+setup
+
+build_image "${git_hash}"
+run_image "${git_hash}"
